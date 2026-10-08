@@ -1,0 +1,6 @@
+@ApiConControllers_HostAddress = http://localhost:5224
+
+GET {{ApiConControllers_HostAddress}}/weatherforecast/
+Accept: application/json
+
+###
