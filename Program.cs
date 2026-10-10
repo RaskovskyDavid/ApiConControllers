@@ -1,4 +1,6 @@
+using ApiConControllers.Middlewears;
 using Scalar.AspNetCore;
+using Microsoft.OpenApi;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -12,6 +14,18 @@ builder.Services.AddSwaggerGen(options =>
     var xmlFile = $"{System.Reflection.Assembly.GetExecutingAssembly().GetName().Name}.xml";
     var xmlPath = Path.Combine(AppContext.BaseDirectory, xmlFile);
     options.IncludeXmlComments(xmlPath);
+    options.AddSecurityDefinition("BasicAuth", new OpenApiSecurityScheme
+    {
+        Type = SecuritySchemeType.Http,
+        Scheme = "basic",
+        In = ParameterLocation.Header,
+        Description = "Autenticación básica. Usa el formato username/password."
+    });
+
+    options.AddSecurityRequirement(document => new OpenApiSecurityRequirement()
+    {
+        [new OpenApiSecuritySchemeReference("BasicAuth", document)] = []
+    });
 });
 var MyAllowOrigins = "MyAllowOrigins";
 
@@ -38,7 +52,7 @@ if (app.Environment.IsDevelopment())
 }
 
 app.UseHttpsRedirection();
-
+app.UseBasicAuth();
 app.UseAuthorization();
 //Custom Middleware
 // app.Use(async (context, next) =>
