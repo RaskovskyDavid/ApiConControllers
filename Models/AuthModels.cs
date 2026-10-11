@@ -15,4 +15,15 @@ public record AddRoleRequest(
     [Required, EmailAddress] string Email,
     [Required] string Role);
 
-public record AuthResponse(string Token, DateTime ExpiresAt);
+public record RefreshRequest([Required] string RefreshToken);
+
+public record RevokeRequest([Required] string RefreshToken);
+
+public record AuthResponse(
+    string UserId,
+    string Email,
+    IEnumerable<string> Roles,
+    string AccessToken,
+    DateTime AccessTokenExpiresAt,
+    string RefreshToken,
+    DateTime RefreshTokenExpiresAt);

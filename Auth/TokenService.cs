@@ -1,17 +1,18 @@
-using System;
-using System.Security.Claims;
-using System.Text;
+using ApiConControllers.Entities;
 using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.JsonWebTokens;
 using Microsoft.IdentityModel.Tokens;
-using ApiConControllers.Entities;
+using System;
+using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
 namespace ApiConControllers.Auth;
 
 public class TokenService(IOptions<JwtSettings> jwtSettings) : ITokenService
 
 {
     private readonly JwtSettings _settings = jwtSettings.Value;
-    public (string Token, DateTime ExpiresAt) CreateToken(ApplicationUser user, IEnumerable<string> roles)
+    public (string Token, DateTime ExpiresAt) CreateAccessToken(ApplicationUser user, IEnumerable<string> roles)
     {
         var expiresAt = DateTime.UtcNow.AddMinutes(_settings.ExpiryMinutes);
 
@@ -45,5 +46,20 @@ public class TokenService(IOptions<JwtSettings> jwtSettings) : ITokenService
         var token = handler.CreateToken(descriptor);
 
         return (token, expiresAt);
+    }
+    public string CreateRefreshToken()
+    {
+        // A refresh token is just a large cryptographically-random value.
+        // RandomNumberGenerator replaces the obsolete RNGCryptoServiceProvider.
+        var randomBytes = RandomNumberGenerator.GetBytes(64);
+        return Convert.ToBase64String(randomBytes);
+    }
+
+    public string HashToken(string token)
+    {
+        // The refresh token is already high-entropy random data, so a plain SHA-256 is enough
+        // (no salt or slow hash needed, unlike passwords).
+        var hash = SHA256.HashData(Encoding.UTF8.GetBytes(token));
+        return Convert.ToHexString(hash);
     }
 }

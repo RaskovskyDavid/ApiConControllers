@@ -1,9 +1,12 @@
 using ApiConControllers.Auth;
+using ApiConControllers.Data;
 using ApiConControllers.Entities;
 using ApiConControllers.Models;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 
 namespace ApiConControllers.Controllers
 {
@@ -12,10 +15,12 @@ namespace ApiConControllers.Controllers
     public class AuthController(
         UserManager<ApplicationUser> userManager,
         RoleManager<IdentityRole> roleManager,
-        ITokenService tokenService) : ControllerBase
+        ITokenService tokenService,
+        AppDbContext db,
+        IOptions<JwtSettings> jwtSettings) : ControllerBase
     {
         /// <summary>
-        /// Registra un usuario nuevo con el rol User y devuelve un JWT.
+        /// Registra un usuario nuevo con el rol User y devuelve access token + refresh token.
         /// </summary>
         [HttpPost("register")]
         [AllowAnonymous]
@@ -41,13 +46,11 @@ namespace ApiConControllers.Controllers
 
             await userManager.AddToRoleAsync(user, Roles.User);
 
-            var roles = await userManager.GetRolesAsync(user);
-            var (token, expiresAt) = tokenService.CreateToken(user, roles);
-            return Ok(new AuthResponse(token, expiresAt));
+            return Ok(await IssueTokensAsync(user));
         }
 
         /// <summary>
-        /// Valida credenciales y devuelve un JWT con los roles del usuario.
+        /// Valida credenciales y devuelve access token (JWT) + refresh token.
         /// </summary>
         [HttpPost("login")]
         [AllowAnonymous]
@@ -61,9 +64,64 @@ namespace ApiConControllers.Controllers
                 return Unauthorized(new { message = "Invalid email or password." });
             }
 
-            var roles = await userManager.GetRolesAsync(user);
-            var (token, expiresAt) = tokenService.CreateToken(user, roles);
-            return Ok(new AuthResponse(token, expiresAt));
+            return Ok(await IssueTokensAsync(user));
+        }
+
+        /// <summary>
+        /// Cambia un refresh token válido por un par nuevo (access + refresh). El refresh anterior queda revocado.
+        /// </summary>
+        [HttpPost("refresh")]
+        [AllowAnonymous]
+        public async Task<ActionResult<AuthResponse>> Refresh(RefreshRequest request)
+        {
+            var hash = tokenService.HashToken(request.RefreshToken);
+            var existing = await db.RefreshTokens.FirstOrDefaultAsync(t => t.TokenHash == hash);
+
+            // Token que nunca emitimos: rechazar.
+            if (existing is null)
+            {
+                return Unauthorized(new { message = "Invalid refresh token." });
+            }
+
+            // Existe pero no sirve. Si ya estaba revocado, alguien reutiliza un token viejo
+            // (posible robo): revocamos todos los tokens activos del usuario.
+            if (!existing.IsActive)
+            {
+                if (existing.Revoked is not null)
+                {
+                    await RevokeAllActiveTokensAsync(existing.UserId);
+                }
+                return Unauthorized(new { message = "Invalid refresh token." });
+            }
+
+            var user = await userManager.FindByIdAsync(existing.UserId);
+            if (user is null)
+            {
+                return Unauthorized(new { message = "Invalid refresh token." });
+            }
+
+            // Rotación: el token usado se revoca y se emite uno nuevo.
+            return Ok(await IssueTokensAsync(user, replacing: existing));
+        }
+
+        /// <summary>
+        /// Revoca un refresh token (logout). El access token ya emitido sigue válido hasta que expire.
+        /// </summary>
+        [HttpPost("revoke")]
+        [AllowAnonymous]
+        public async Task<IActionResult> Revoke(RevokeRequest request)
+        {
+            var hash = tokenService.HashToken(request.RefreshToken);
+            var token = await db.RefreshTokens.FirstOrDefaultAsync(t => t.TokenHash == hash);
+
+            if (token is null || !token.IsActive)
+            {
+                return NotFound(new { message = "Token not found or already inactive." });
+            }
+
+            token.Revoked = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+            return Ok(new { message = "Refresh token revoked." });
         }
 
         /// <summary>
@@ -96,6 +154,54 @@ namespace ApiConControllers.Controllers
             }
 
             return Ok(new { message = $"Role '{request.Role}' added to '{request.Email}'." });
+        }
+
+        // Crea el access token y un refresh token nuevo (guardando solo su hash).
+        // Si "replacing" viene informado, ese token se revoca en el MISMO SaveChanges (rotación atómica).
+        private async Task<AuthResponse> IssueTokensAsync(ApplicationUser user, RefreshToken? replacing = null)
+        {
+            var roles = await userManager.GetRolesAsync(user);
+            var (accessToken, accessExpiresAt) = tokenService.CreateAccessToken(user, roles);
+
+            var refreshToken = tokenService.CreateRefreshToken();
+            var refreshHash = tokenService.HashToken(refreshToken);
+            var refreshExpiresAt = DateTime.UtcNow.AddDays(jwtSettings.Value.RefreshTokenDays);
+
+            if (replacing is not null)
+            {
+                replacing.Revoked = DateTime.UtcNow;
+                replacing.ReplacedByTokenHash = refreshHash;
+            }
+
+            db.RefreshTokens.Add(new RefreshToken
+            {
+                TokenHash = refreshHash,
+                UserId = user.Id,
+                Created = DateTime.UtcNow,
+                Expires = refreshExpiresAt
+            });
+            await db.SaveChangesAsync();
+
+            return new AuthResponse(
+                user.Id, user.Email!, roles,
+                accessToken, accessExpiresAt,
+                refreshToken, refreshExpiresAt);
+        }
+
+        // Si se detecta un token robado, se cancelan todos los activos de ese usuario:
+        // el atacante y el usuario real tienen que volver a iniciar sesión.
+        private async Task RevokeAllActiveTokensAsync(string userId)
+        {
+            var activeTokens = await db.RefreshTokens
+                .Where(t => t.UserId == userId && t.Revoked == null)
+                .ToListAsync();
+
+            foreach (var token in activeTokens)
+            {
+                token.Revoked = DateTime.UtcNow;
+            }
+
+            await db.SaveChangesAsync();
         }
     }
 }
