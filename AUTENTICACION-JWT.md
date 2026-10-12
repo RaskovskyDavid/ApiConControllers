@@ -4,6 +4,8 @@ Guía de repaso de cómo está implementada la autenticación en este proyecto: 
 
 > **Actualización:** el proyecto ya incluye refresh tokens. `TokenService.CreateToken` pasó a llamarse `CreateAccessToken`, `AuthResponse` devuelve ahora access token y refresh token, y `ExpiryMinutes` es 15. Esta guía describe la base JWT; el refresh token está en [REFRESH-TOKENS.md](REFRESH-TOKENS.md).
 
+> **Roles y seed:** el seed ya no vive en `Program.cs` ni usa `SeedAdmin`. Ahora hay roles `User`, `Manager` y `Admin`, políticas de autorización y un `IdentitySeeder`; todo está en [ROLES-AUTORIZACION.md](ROLES-AUTORIZACION.md).
+
 ## Cómo funciona
 
 El servidor firma un token JWT cuando el usuario inicia sesión. El cliente lo envía en cada petición y el servidor solo verifica la firma; no guarda sesión.

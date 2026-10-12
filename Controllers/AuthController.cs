@@ -128,7 +128,7 @@ namespace ApiConControllers.Controllers
         /// Asigna un rol existente a un usuario. Solo Admin.
         /// </summary>
         [HttpPost("add-role")]
-        [Authorize(Roles = Roles.Admin)]
+        [Authorize(Policy = Policies.AdminOnly)]
         public async Task<IActionResult> AddRole(AddRoleRequest request)
         {
             if (!await roleManager.RoleExistsAsync(request.Role))

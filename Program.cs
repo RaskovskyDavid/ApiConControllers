@@ -23,6 +23,9 @@ builder.Services
     .AddRoles<IdentityRole>()
     .AddEntityFrameworkStores<AppDbContext>();
 builder.Services.AddScoped<ITokenService, TokenService>();
+builder.Services.AddIdentitySeeder(builder.Configuration);
+// Named authorization policies (UserOrAbove, ManagerOrAbove, AdminOnly) - see Auth/Policies.cs.
+builder.Services.AddRolePolicies();
 // Add services to the container.
 
 // 3. Tell ASP.NET Core to authenticate requests using JWT bearer tokens.
@@ -48,6 +51,8 @@ builder.Services
             // No grace period on expiry - the token dies exactly when it says it does.
             ClockSkew = TimeSpan.Zero,
             NameClaimType = JwtRegisteredClaimNames.Name,
+            // RoleClaimType must match the claim name TokenService writes roles under.
+            // If these two disagree, every role check fails with 403.
             RoleClaimType = "role"
         };
     });
@@ -89,40 +94,8 @@ builder.Services.AddCors(options =>
 });
 var app = builder.Build();
 
-// Create the SQLite schema, the roles and a seed admin so /auth/add-role can be tested.
-using (var scope = app.Services.CreateScope())
-{
-    var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    await db.Database.EnsureCreatedAsync();
-
-    var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
-    foreach (var role in new[] { Roles.User, Roles.Admin })
-    {
-        if (!await roleManager.RoleExistsAsync(role))
-        {
-            await roleManager.CreateAsync(new IdentityRole(role));
-        }
-    }
-
-    var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
-    var seed = builder.Configuration.GetSection("SeedAdmin");
-    var adminEmail = seed["Email"];
-    if (!string.IsNullOrEmpty(adminEmail) && await userManager.FindByEmailAsync(adminEmail) is null)
-    {
-        var admin = new ApplicationUser
-        {
-            UserName = adminEmail,
-            Email = adminEmail,
-            FirstName = seed["FirstName"] ?? "Admin",
-            LastName = seed["LastName"] ?? string.Empty
-        };
-        var created = await userManager.CreateAsync(admin, seed["Password"]!);
-        if (created.Succeeded)
-        {
-            await userManager.AddToRoleAsync(admin, Roles.Admin);
-        }
-    }
-}
+// Create the schema, the roles and the initial users (see Data/IdentitySeeder.cs).
+await app.SeedIdentityAsync();
 
 app.UseCors(MyAllowOrigins);
 // Configure the HTTP request pipeline.
