@@ -1,11 +1,14 @@
+using ApiConControllers.Auth;
 using ApiConControllers.Entities;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 namespace ApiConControllers.Data;
 
-// Deja la base lista para usar: esquema, roles y usuarios iniciales.
-// Es idempotente: se puede ejecutar en cada arranque sin duplicar nada.
+// Deja la base lista para usar: esquema, roles, usuarios y claims iniciales.
+// Es IDEMPOTENTE y CONVERGENTE: describe el estado deseado y lo reconcilia en cada arranque.
+// Crea lo que falta y corrige lo que difiere, sin duplicar. Así también funciona con una base
+// que ya tenía los usuarios de un arranque anterior (sin claims).
 public class IdentitySeeder(
     AppDbContext db,
     RoleManager<IdentityRole> roleManager,
@@ -29,8 +32,7 @@ public class IdentitySeeder(
                 continue;
             }
 
-            var result = await roleManager.CreateAsync(new IdentityRole(role));
-            LogResult(result, $"create role '{role}'");
+            LogResult(await roleManager.CreateAsync(new IdentityRole(role)), $"create role '{role}'");
         }
     }
 
@@ -38,32 +40,70 @@ public class IdentitySeeder(
     {
         foreach (var seed in options.Value.Users)
         {
-            if (!Roles.All.Contains(seed.Role))
-            {
-                logger.LogWarning("Seed user '{Email}' skipped: unknown role '{Role}'.", seed.Email, seed.Role);
-                continue;
-            }
-
-            if (await userManager.FindByEmailAsync(seed.Email) is not null)
+            if (!IsValid(seed))
             {
                 continue;
             }
 
-            var user = new ApplicationUser
-            {
-                UserName = seed.Email,
-                Email = seed.Email,
-                FirstName = seed.FirstName,
-                LastName = seed.LastName
-            };
-
-            var created = await userManager.CreateAsync(user, seed.Password);
-            if (!LogResult(created, $"create seed user '{seed.Email}'"))
+            var user = await userManager.FindByEmailAsync(seed.Email) ?? await CreateUserAsync(seed);
+            if (user is null)
             {
                 continue;
             }
 
-            LogResult(await userManager.AddToRoleAsync(user, seed.Role), $"add '{seed.Email}' to role '{seed.Role}'");
+            await EnsureRoleAsync(user, seed.Role);
+            await EnsureClaimAsync(user, AppClaimTypes.Department, seed.Department);
+            await EnsureClaimAsync(user, AppClaimTypes.Subscription, seed.Subscription);
+        }
+    }
+
+    // Un valor desconocido (rol, departamento, suscripción) se omite con una advertencia
+    // en lugar de sembrar datos que ninguna política reconoce.
+    private bool IsValid(SeedUser seed)
+    {
+        var problem = !Roles.All.Contains(seed.Role) ? $"unknown role '{seed.Role}'"
+            : !IsValidOptionalClaim(AppClaimTypes.Department, seed.Department) ? $"unknown department '{seed.Department}'"
+            : !IsValidOptionalClaim(AppClaimTypes.Subscription, seed.Subscription) ? $"unknown subscription '{seed.Subscription}'"
+            : null;
+
+        if (problem is not null)
+        {
+            logger.LogWarning("Seed user '{Email}' skipped: {Problem}.", seed.Email, problem);
+        }
+
+        return problem is null;
+    }
+
+    private static bool IsValidOptionalClaim(string type, string value) =>
+        value.Length == 0 || AppClaimTypes.IsValid(type, value);
+
+    private async Task<ApplicationUser?> CreateUserAsync(SeedUser seed)
+    {
+        var user = new ApplicationUser
+        {
+            UserName = seed.Email,
+            Email = seed.Email,
+            FirstName = seed.FirstName,
+            LastName = seed.LastName
+        };
+
+        var created = await userManager.CreateAsync(user, seed.Password);
+        return LogResult(created, $"create seed user '{seed.Email}'") ? user : null;
+    }
+
+    private async Task EnsureRoleAsync(ApplicationUser user, string role)
+    {
+        if (!await userManager.IsInRoleAsync(user, role))
+        {
+            LogResult(await userManager.AddToRoleAsync(user, role), $"add '{user.Email}' to role '{role}'");
+        }
+    }
+
+    private async Task EnsureClaimAsync(ApplicationUser user, string type, string value)
+    {
+        if (value.Length > 0)
+        {
+            LogResult(await userManager.SetClaimAsync(user, type, value), $"set claim '{type}' for '{user.Email}'");
         }
     }
 

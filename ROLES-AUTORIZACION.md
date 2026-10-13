@@ -196,3 +196,7 @@ Para ver los roles de un token, pégalo en [jwt.io](https://jwt.io) y busca el c
 - Autorización por **recurso** (el dueño de un registro puede editarlo): `IAuthorizationService.AuthorizeAsync(User, resource, policy)`.
 - Migrar de `EnsureCreatedAsync` a migraciones de EF Core.
 - Escribir pruebas de integración con `WebApplicationFactory` que verifiquen la tabla de la sección 6.
+
+## Siguiente paso
+
+Autorización por atributos del usuario (departamento, suscripción) con **claims**: ver [CLAIMS-AUTORIZACION.md](CLAIMS-AUTORIZACION.md). Ojo: el seeder ahora reconcilia usuarios existentes y `AddRolePolicies` se renombró a `AddAuthorizationPolicies`.

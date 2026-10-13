@@ -156,12 +156,47 @@ namespace ApiConControllers.Controllers
             return Ok(new { message = $"Role '{request.Role}' added to '{request.Email}'." });
         }
 
+        /// <summary>
+        /// Asigna (o cambia) un claim del usuario: department o subscription. Solo Admin.
+        /// </summary>
+        [HttpPost("set-claim")]
+        [Authorize(Policy = Policies.AdminOnly)]
+        public async Task<IActionResult> SetClaim(SetClaimRequest request)
+        {
+            if (!AppClaimTypes.IsKnownType(request.Type))
+            {
+                return BadRequest(new { message = $"Unknown claim type '{request.Type}'." });
+            }
+
+            if (!AppClaimTypes.IsValid(request.Type, request.Value))
+            {
+                return BadRequest(new { message = $"Invalid value '{request.Value}' for claim '{request.Type}'." });
+            }
+
+            var user = await userManager.FindByEmailAsync(request.Email);
+            if (user is null)
+            {
+                return NotFound(new { message = $"User '{request.Email}' not found." });
+            }
+
+            var result = await userManager.SetClaimAsync(user, request.Type, request.Value);
+            if (!result.Succeeded)
+            {
+                return BadRequest(result.Errors);
+            }
+
+            return Ok(new { message = $"Claim '{request.Type}' = '{request.Value}' set for '{request.Email}'." });
+        }
+
         // Crea el access token y un refresh token nuevo (guardando solo su hash).
         // Si "replacing" viene informado, ese token se revoca en el MISMO SaveChanges (rotación atómica).
         private async Task<AuthResponse> IssueTokensAsync(ApplicationUser user, RefreshToken? replacing = null)
         {
+            // Roles y claims se leen de la base en cada emisión (login y refresh): un cambio hecho
+            // con add-role o set-claim llega al token nuevo, no al que ya está en circulación.
             var roles = await userManager.GetRolesAsync(user);
-            var (accessToken, accessExpiresAt) = tokenService.CreateAccessToken(user, roles);
+            var claims = await userManager.GetClaimsAsync(user);
+            var (accessToken, accessExpiresAt) = tokenService.CreateAccessToken(user, roles, claims);
 
             var refreshToken = tokenService.CreateRefreshToken();
             var refreshHash = tokenService.HashToken(refreshToken);

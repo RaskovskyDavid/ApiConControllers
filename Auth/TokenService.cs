@@ -12,7 +12,8 @@ public class TokenService(IOptions<JwtSettings> jwtSettings) : ITokenService
 
 {
     private readonly JwtSettings _settings = jwtSettings.Value;
-    public (string Token, DateTime ExpiresAt) CreateAccessToken(ApplicationUser user, IEnumerable<string> roles)
+    public (string Token, DateTime ExpiresAt) CreateAccessToken(
+        ApplicationUser user, IEnumerable<string> roles, IEnumerable<Claim> userClaims)
     {
         var expiresAt = DateTime.UtcNow.AddMinutes(_settings.ExpiryMinutes);
 
@@ -27,6 +28,9 @@ public class TokenService(IOptions<JwtSettings> jwtSettings) : ITokenService
 
         // One "role" claim per role the user has.
         claims.AddRange(roles.Select(role => new Claim("role", role)));
+
+        // The user's own claims (department, subscription...) travel inside the token too.
+        claims.AddRange(userClaims);
 
         // The signing key proves the token came from us and was not tampered with.
         var signingKey = new SymmetricSecurityKey(Encoding.UTF8.GetBytes(_settings.Key));

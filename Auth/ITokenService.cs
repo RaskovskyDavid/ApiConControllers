@@ -1,11 +1,14 @@
 using System;
+using System.Security.Claims;
 using ApiConControllers.Entities;
 namespace ApiConControllers.Auth;
 
 public interface ITokenService
 {
     // Builds a signed JWT (access token) for the user and returns it with its expiry time.
-    (string Token, DateTime ExpiresAt) CreateAccessToken(ApplicationUser user, IEnumerable<string> roles);
+    // "claims" are the user's own claims (department, subscription...) stored in Identity.
+    (string Token, DateTime ExpiresAt) CreateAccessToken(
+        ApplicationUser user, IEnumerable<string> roles, IEnumerable<Claim> claims);
 
     // Builds a random, opaque refresh token. It is NOT a JWT.
     string CreateRefreshToken();

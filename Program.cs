@@ -24,8 +24,8 @@ builder.Services
     .AddEntityFrameworkStores<AppDbContext>();
 builder.Services.AddScoped<ITokenService, TokenService>();
 builder.Services.AddIdentitySeeder(builder.Configuration);
-// Named authorization policies (UserOrAbove, ManagerOrAbove, AdminOnly) - see Auth/Policies.cs.
-builder.Services.AddRolePolicies();
+// Named authorization policies (role-based and claim-based) - see Auth/Policies.cs.
+builder.Services.AddAuthorizationPolicies();
 // Add services to the container.
 
 // 3. Tell ASP.NET Core to authenticate requests using JWT bearer tokens.

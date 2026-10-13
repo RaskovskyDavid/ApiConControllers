@@ -15,6 +15,11 @@ public record AddRoleRequest(
     [Required, EmailAddress] string Email,
     [Required] string Role);
 
+public record SetClaimRequest(
+    [Required, EmailAddress] string Email,
+    [Required] string Type,
+    [Required] string Value);
+
 public record RefreshRequest([Required] string RefreshToken);
 
 public record RevokeRequest([Required] string RefreshToken);
