@@ -2,6 +2,7 @@ namespace ApiConControllers.Entities;
 
 // Nombres de los claims de la app, en un solo lugar para no cometer typos.
 // Los tipos Y los valores de un claim distinguen mayúsculas: "Department" y "department" son claims distintos.
+// Los permisos NO son claims: se calculan en cada petición desde las membresías (ver DepartmentMembership).
 public static class AppClaimTypes
 {
     public const string Department = "department";

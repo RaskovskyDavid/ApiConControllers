@@ -1,18 +1,21 @@
 using ApiConControllers.Auth;
+using ApiConControllers.Authorization;
 using ApiConControllers.Entities;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 namespace ApiConControllers.Data;
 
-// Deja la base lista para usar: esquema, roles, usuarios y claims iniciales.
+// Deja la base lista para usar: esquema, roles, permisos de los roles, usuarios y claims iniciales.
 // Es IDEMPOTENTE y CONVERGENTE: describe el estado deseado y lo reconcilia en cada arranque.
-// Crea lo que falta y corrige lo que difiere, sin duplicar. Así también funciona con una base
-// que ya tenía los usuarios de un arranque anterior (sin claims).
+// Crea lo que falta y corrige lo que difiere, sin duplicar.
+// OJO: los permisos solo se AÑADEN. Si revocas uno en caliente con la API y reinicias, el seed lo
+// vuelve a conceder mientras siga en appsettings.json.
 public class IdentitySeeder(
     AppDbContext db,
     RoleManager<IdentityRole> roleManager,
     UserManager<ApplicationUser> userManager,
+    PermissionStore permissionStore,
     IOptions<SeedOptions> options,
     ILogger<IdentitySeeder> logger)
 {
@@ -20,6 +23,7 @@ public class IdentitySeeder(
     {
         await db.Database.EnsureCreatedAsync();
         await SeedRolesAsync();
+        await SeedRolePermissionsAsync();
         await SeedUsersAsync();
     }
 
@@ -36,12 +40,47 @@ public class IdentitySeeder(
         }
     }
 
+    // Los permisos se conceden a los ROLES, como claims del propio rol (AspNetRoleClaims).
+    private async Task SeedRolePermissionsAsync()
+    {
+        foreach (var (role, permissions) in options.Value.RolePermissions)
+        {
+            if (!Roles.All.Contains(role))
+            {
+                logger.LogWarning("Seed permissions for role '{Role}' skipped: unknown role.", role);
+                continue;
+            }
+
+            // Cada entrada puede ser un permiso o un comodín de módulo ("Permissions.Orders.*").
+            foreach (var permission in permissions.SelectMany(Permissions.Expand))
+            {
+                if (!Permissions.All.Contains(permission))
+                {
+                    logger.LogWarning("Seed permission '{Permission}' for role '{Role}' skipped: unknown permission.", permission, role);
+                    continue;
+                }
+
+                // GrantAsync es idempotente y expulsa la caché del store.
+                if (!await permissionStore.GrantAsync(role, permission))
+                {
+                    logger.LogError("Seed failed to grant '{Permission}' to role '{Role}': role not found.", permission, role);
+                }
+            }
+
+            foreach (var wildcard in permissions.Where(p => p.EndsWith(".*", StringComparison.Ordinal) && !Permissions.Expand(p).Any()))
+            {
+                logger.LogWarning("Seed wildcard '{Wildcard}' for role '{Role}' skipped: it matches no permission.", wildcard, role);
+            }
+        }
+    }
+
     private async Task SeedUsersAsync()
     {
         foreach (var seed in options.Value.Users)
         {
-            if (!IsValid(seed))
+            if (FindProblem(seed) is { } problem)
             {
+                logger.LogWarning("Seed user '{Email}' skipped: {Problem}.", seed.Email, problem);
                 continue;
             }
 
@@ -57,21 +96,26 @@ public class IdentitySeeder(
         }
     }
 
-    // Un valor desconocido (rol, departamento, suscripción) se omite con una advertencia
-    // en lugar de sembrar datos que ninguna política reconoce.
-    private bool IsValid(SeedUser seed)
+    // Un valor desconocido (rol, departamento, suscripción) hace que se omita el usuario con una
+    // advertencia, en lugar de sembrar datos que ninguna política reconoce.
+    private static string? FindProblem(SeedUser seed)
     {
-        var problem = !Roles.All.Contains(seed.Role) ? $"unknown role '{seed.Role}'"
-            : !IsValidOptionalClaim(AppClaimTypes.Department, seed.Department) ? $"unknown department '{seed.Department}'"
-            : !IsValidOptionalClaim(AppClaimTypes.Subscription, seed.Subscription) ? $"unknown subscription '{seed.Subscription}'"
-            : null;
-
-        if (problem is not null)
+        if (!Roles.All.Contains(seed.Role))
         {
-            logger.LogWarning("Seed user '{Email}' skipped: {Problem}.", seed.Email, problem);
+            return $"unknown role '{seed.Role}'";
         }
 
-        return problem is null;
+        if (!IsValidOptionalClaim(AppClaimTypes.Department, seed.Department))
+        {
+            return $"unknown department '{seed.Department}'";
+        }
+
+        if (!IsValidOptionalClaim(AppClaimTypes.Subscription, seed.Subscription))
+        {
+            return $"unknown subscription '{seed.Subscription}'";
+        }
+
+        return null;
     }
 
     private static bool IsValidOptionalClaim(string type, string value) =>

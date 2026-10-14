@@ -83,9 +83,11 @@ public static class Policies
     public const string ManagerOrAbove = nameof(ManagerOrAbove);
     public const string AdminOnly = nameof(AdminOnly);
 
-    public static IServiceCollection AddRolePolicies(this IServiceCollection services)
+    public static IServiceCollection AddAuthorizationPolicies(this IServiceCollection services)
     {
         services.AddAuthorizationBuilder()
+            // Seguro por defecto: todo endpoint exige autenticación salvo [AllowAnonymous]
+            .SetFallbackPolicy(new AuthorizationPolicyBuilder().RequireAuthenticatedUser().Build())
             .AddPolicy(UserOrAbove, p => p.RequireRole(Roles.User, Roles.Manager, Roles.Admin))
             .AddPolicy(ManagerOrAbove, p => p.RequireRole(Roles.Manager, Roles.Admin))
             .AddPolicy(AdminOnly, p => p.RequireRole(Roles.Admin));
@@ -96,32 +98,40 @@ public static class Policies
 
 `RequireRole(a, b)` significa "a **o** b". Si mañana `Manager` pierde acceso a algo, se cambia aquí y se aplica a todos los endpoints que usan la política.
 
+El mismo método registra además las políticas de claims y los componentes de permisos que se ven en las guías siguientes. La **política fallback** hace la API segura por defecto: un endpoint sin `[Authorize]` también exige un usuario autenticado, y los públicos (`register`, `login`...) llevan `[AllowAnonymous]`.
+
 ### Paso 3: el seed (datos iniciales)
 
 Antes estaba dentro de `Program.cs` y solo creaba un admin. Ahora son tres archivos con una responsabilidad cada uno.
 
-**Configuración** (`appsettings.json`): una lista de usuarios, cada uno con su rol.
+**Configuración** (`appsettings.json`): una lista de usuarios, cada uno con su rol, y los permisos que se conceden a cada rol (ver [PERMISSION-BASED-AUTHORIZATION.md](PERMISSION-BASED-AUTHORIZATION.md)).
 
 ```json
 "Seed": {
+  "RolePermissions": {
+    "Admin":   [ "Permissions.Products.View", "Permissions.Products.Create", "Permissions.Products.Edit", "Permissions.Products.Delete" ],
+    "Manager": [ "Permissions.Products.View", "Permissions.Products.Create" ],
+    "User":    [ "Permissions.Products.View" ]
+  },
   "Users": [
-    { "Email": "admin@example.com",   "Password": "Admin123!",   "FirstName": "Admin",   "LastName": "Root",    "Role": "Admin" },
-    { "Email": "manager@example.com", "Password": "Manager123!", "FirstName": "Manager", "LastName": "User",    "Role": "Manager" },
-    { "Email": "user@example.com",    "Password": "User123!",    "FirstName": "User",    "LastName": "Example", "Role": "User" }
+    { "Email": "admin@example.com",   "Password": "Admin123!",   "FirstName": "Admin",   "LastName": "Root",    "Role": "Admin",   "Department": "engineering", "Subscription": "premium" },
+    { "Email": "manager@example.com", "Password": "Manager123!", "FirstName": "Manager", "LastName": "User",    "Role": "Manager", "Department": "operations",  "Subscription": "standard" },
+    { "Email": "user@example.com",    "Password": "User123!",    "FirstName": "User",    "LastName": "Example", "Role": "User",    "Department": "none",        "Subscription": "free" }
   ]
 }
 ```
 
 **Modelo** (`Data/SeedOptions.cs`): clases que reciben esa sección, siguiendo el *Options pattern* (igual que `JwtSettings`).
 
-**Seeder** (`Data/IdentitySeeder.cs`): una clase con tres métodos pequeños.
+**Seeder** (`Data/IdentitySeeder.cs`): una clase con pasos pequeños.
 
 ```csharp
 public async Task SeedAsync()
 {
     await db.Database.EnsureCreatedAsync();
-    await SeedRolesAsync();   // recorre Roles.All y crea los que falten
-    await SeedUsersAsync();   // crea los usuarios de Seed:Users que falten
+    await SeedRolesAsync();            // recorre Roles.All y crea los que falten
+    await SeedRolePermissionsAsync();  // concede a cada rol los permisos de Seed:RolePermissions
+    await SeedUsersAsync();            // crea los usuarios de Seed:Users y asegura su rol y sus claims
 }
 ```
 
@@ -199,4 +209,5 @@ Para ver los roles de un token, pégalo en [jwt.io](https://jwt.io) y busca el c
 
 ## Siguiente paso
 
-Autorización por atributos del usuario (departamento, suscripción) con **claims**: ver [CLAIMS-AUTORIZACION.md](CLAIMS-AUTORIZACION.md). Ojo: el seeder ahora reconcilia usuarios existentes y `AddRolePolicies` se renombró a `AddAuthorizationPolicies`.
+- Autorización por atributos del usuario (departamento, suscripción): [CLAIMS-AUTORIZACION.md](CLAIMS-AUTORIZACION.md).
+- Permisos como claims de los roles, con los modos `Token` y `Lookup`: [PERMISSION-BASED-AUTHORIZATION.md](PERMISSION-BASED-AUTHORIZATION.md).

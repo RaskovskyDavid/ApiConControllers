@@ -83,9 +83,10 @@ Si el claim ya está igual, no hace nada; si existe con otro valor, lo quita y p
 
 ```csharp
 // AuthController.IssueTokensAsync
-var roles  = await userManager.GetRolesAsync(user);
-var claims = await userManager.GetClaimsAsync(user);
-var (accessToken, accessExpiresAt) = tokenService.CreateAccessToken(user, roles, claims);
+var roles       = await userManager.GetRolesAsync(user);
+var claims      = await userManager.GetClaimsAsync(user);
+var permissions = await permissionStore.GetForRolesAsync(roles);   // ver PERMISSION-BASED-AUTHORIZATION.md
+var (accessToken, accessExpiresAt) = tokenService.CreateAccessToken(user, roles, claims, permissions);
 ```
 
 ```csharp
@@ -94,7 +95,7 @@ claims.AddRange(roles.Select(role => new Claim("role", role)));
 claims.AddRange(userClaims);   // department, subscription...
 ```
 
-Como `register`, `login` y `refresh` pasan por `IssueTokensAsync`, los tres incluyen los claims sin repetir código.
+Como `register`, `login` y `refresh` pasan por `IssueTokensAsync`, los tres incluyen los claims sin repetir código. El cuarto argumento (`permissions`) no tiene que ver con estos claims: los permisos son claims del **rol** y solo se graban en el token en modo `Token`.
 
 ### Paso 4: las políticas
 
@@ -247,3 +248,7 @@ Fíjate en `User` en `/Reports/department`: su claim `department` **existe** (va
 - Un endpoint `DELETE` para quitar un claim.
 - Una `IClaimsTransformation` para añadir claims calculados en cada petición.
 - Releer los claims desde la base en cada petición (por ejemplo en `OnTokenValidated`) para que un cambio surta efecto sin esperar al refresh.
+
+## Siguiente paso
+
+Autorización por acciones concretas con **permisos** como claims de los roles, y los modos `Token` y `Lookup`: ver [PERMISSION-BASED-AUTHORIZATION.md](PERMISSION-BASED-AUTHORIZATION.md).

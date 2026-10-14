@@ -1,3 +1,4 @@
+using ApiConControllers.Authorization;
 using ApiConControllers.Entities;
 using Microsoft.AspNetCore.Authorization;
 namespace ApiConControllers.Auth;
@@ -20,9 +21,18 @@ public static class Policies
     // ROL + CLAIM a la vez
     public const string EngineeringAdmin = nameof(EngineeringAdmin);   // Admin Y department = engineering
 
+    // Los PERMISOS no están aquí: sus políticas ("Permissions.Products.View"...) las fabrica a pedido
+    // PermissionPolicyProvider (ver Authorization/). Se usan con [Authorize(Policy = Permissions.Products.View)].
+
     public static IServiceCollection AddAuthorizationPolicies(this IServiceCollection services)
     {
         services.AddAuthorizationBuilder()
+            // Seguro por defecto: todo endpoint exige un usuario autenticado salvo que opte por salir
+            // con [AllowAnonymous]. Cubre también los endpoints que nunca declararon [Authorize].
+            .SetFallbackPolicy(new AuthorizationPolicyBuilder()
+                .RequireAuthenticatedUser()
+                .Build())
+
             // RequireRole(a, b) significa "a O b".
             .AddPolicy(UserOrAbove, p => p.RequireRole(Roles.User, Roles.Manager, Roles.Admin))
             .AddPolicy(ManagerOrAbove, p => p.RequireRole(Roles.Manager, Roles.Admin))
@@ -44,6 +54,13 @@ public static class Policies
 
         // Un handler por requisito propio. Singleton porque no guarda estado.
         services.AddSingleton<IAuthorizationHandler, SubscriptionHandler>();
+
+        // Permisos: el proveedor DEBE ser singleton (ASP.NET Core resuelve exactamente uno). El handler y
+        // el store también, porque no guardan estado por petición; el store crea su propio scope para
+        // usar RoleManager.
+        services.AddSingleton<IAuthorizationPolicyProvider, PermissionPolicyProvider>();
+        services.AddSingleton<IAuthorizationHandler, PermissionAuthorizationHandler>();
+        services.AddSingleton<PermissionStore>();
 
         return services;
     }

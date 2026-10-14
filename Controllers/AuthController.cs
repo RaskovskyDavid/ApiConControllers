@@ -1,4 +1,5 @@
 using ApiConControllers.Auth;
+using ApiConControllers.Authorization;
 using ApiConControllers.Data;
 using ApiConControllers.Entities;
 using ApiConControllers.Models;
@@ -16,6 +17,7 @@ namespace ApiConControllers.Controllers
         UserManager<ApplicationUser> userManager,
         RoleManager<IdentityRole> roleManager,
         ITokenService tokenService,
+        PermissionStore permissionStore,
         AppDbContext db,
         IOptions<JwtSettings> jwtSettings) : ControllerBase
     {
@@ -196,7 +198,13 @@ namespace ApiConControllers.Controllers
             // con add-role o set-claim llega al token nuevo, no al que ya está en circulación.
             var roles = await userManager.GetRolesAsync(user);
             var claims = await userManager.GetClaimsAsync(user);
-            var (accessToken, accessExpiresAt) = tokenService.CreateAccessToken(user, roles, claims);
+
+            // Los permisos son claims de los ROLES: la unión de los de todos los roles del usuario.
+            // Se resuelven aquí para que la respuesta muestre lo que el usuario puede hacer; si van
+            // DENTRO del token depende de Permissions:Source en appsettings.json.
+            var permissions = await permissionStore.GetForRolesAsync(roles);
+
+            var (accessToken, accessExpiresAt) = tokenService.CreateAccessToken(user, roles, claims, permissions);
 
             var refreshToken = tokenService.CreateRefreshToken();
             var refreshHash = tokenService.HashToken(refreshToken);
@@ -218,7 +226,7 @@ namespace ApiConControllers.Controllers
             await db.SaveChangesAsync();
 
             return new AuthResponse(
-                user.Id, user.Email!, roles,
+                user.Id, user.Email!, roles, permissions.Order(),
                 accessToken, accessExpiresAt,
                 refreshToken, refreshExpiresAt);
         }

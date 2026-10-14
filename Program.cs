@@ -2,6 +2,7 @@ using ApiConControllers.Auth;
 using ApiConControllers.Data;
 using ApiConControllers.Entities;
 using ApiConControllers.Middlewears;
+using ApiConControllers.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -22,10 +23,17 @@ builder.Services
     .AddIdentityCore<ApplicationUser>(options => options.User.RequireUniqueEmail = true)
     .AddRoles<IdentityRole>()
     .AddEntityFrameworkStores<AppDbContext>();
-builder.Services.AddScoped<ITokenService, TokenService>();
+// Where the handler reads permissions from: the token ("Token") or the store per request ("Lookup").
+builder.Services.Configure<PermissionSettings>(builder.Configuration.GetSection("Permissions"));
+// TokenService is registered concretely as well so the diagnostics endpoint can reuse the exact
+// same signing path a real login takes.
+builder.Services.AddScoped<TokenService>();
+builder.Services.AddScoped<ITokenService>(sp => sp.GetRequiredService<TokenService>());
 builder.Services.AddIdentitySeeder(builder.Configuration);
-// Named authorization policies (role-based and claim-based) - see Auth/Policies.cs.
+// Authorization: fallback policy, role/claim policies and the permission pieces - see Auth/Policies.cs.
 builder.Services.AddAuthorizationPolicies();
+builder.Services.AddSingleton<ProductStore>();
+builder.Services.AddSingleton<OrderStore>();
 // Add services to the container.
 
 // 3. Tell ASP.NET Core to authenticate requests using JWT bearer tokens.
@@ -101,8 +109,10 @@ app.UseCors(MyAllowOrigins);
 // Configure the HTTP request pipeline.
 if (app.Environment.IsDevelopment())
 {
-    app.MapOpenApi();
-    app.MapScalarApiReference();
+    // The fallback policy applies to ALL endpoints - the docs UI must opt out too,
+    // or the browser gets a 401 instead of the documentation.
+    app.MapOpenApi().AllowAnonymous();
+    app.MapScalarApiReference().AllowAnonymous();
     app.UseSwagger();
     app.UseSwaggerUI();
 }

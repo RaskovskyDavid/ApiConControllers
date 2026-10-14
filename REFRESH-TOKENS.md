@@ -118,10 +118,12 @@ protected override void OnModelCreating(ModelBuilder builder)
 
 ### Paso 4: `ITokenService` y `TokenService`
 
-Tres responsabilidades, todas sin acceso a la base de datos:
+Tres responsabilidades, todas sin acceso a la base de datos (`claims` son los claims del usuario y `permissions` solo se graban en el token en modo `Token`; ver [PERMISSION-BASED-AUTHORIZATION.md](PERMISSION-BASED-AUTHORIZATION.md)):
 
 ```csharp
-(string Token, DateTime ExpiresAt) CreateAccessToken(ApplicationUser user, IEnumerable<string> roles);
+(string Token, DateTime ExpiresAt) CreateAccessToken(
+    ApplicationUser user, IEnumerable<string> roles,
+    IEnumerable<Claim> claims, IEnumerable<string> permissions);
 string CreateRefreshToken();         // 64 bytes aleatorios en Base64
 string HashToken(string token);      // SHA-256 en hexadecimal
 ```
@@ -143,14 +145,14 @@ public record RefreshRequest([Required] string RefreshToken);
 public record RevokeRequest([Required] string RefreshToken);
 
 public record AuthResponse(
-    string UserId, string Email, IEnumerable<string> Roles,
+    string UserId, string Email, IEnumerable<string> Roles, IEnumerable<string> Permissions,
     string AccessToken, DateTime AccessTokenExpiresAt,
     string RefreshToken, DateTime RefreshTokenExpiresAt);
 ```
 
 ### Paso 6: el controller
 
-El controller recibe además `AppDbContext db` e `IOptions<JwtSettings> jwtSettings`. Tres ideas:
+El controller recibe además `PermissionStore`, `AppDbContext db` e `IOptions<JwtSettings> jwtSettings`. Tres ideas:
 
 1. **Una sola función emite los tokens** (`IssueTokensAsync`). `register`, `login` y `refresh` la usan, así no hay código duplicado.
 2. **La rotación es atómica.** Al refrescar, el token viejo se marca como revocado y el nuevo se inserta antes de un único `SaveChangesAsync()`. O pasan las dos cosas o ninguna.
@@ -180,7 +182,7 @@ public async Task<ActionResult<AuthResponse>> Refresh(RefreshRequest request)
 }
 ```
 
-Además se leen los roles **de nuevo** en cada refresh: si un admin cambió los roles del usuario, el access token nuevo ya los refleja.
+Además se leen los roles, los claims y los permisos **de nuevo** en cada refresh: si un admin cambió los roles del usuario o los permisos de un rol, el access token nuevo ya lo refleja.
 
 ### Paso 7: base de datos
 
@@ -194,7 +196,7 @@ La app usa `EnsureCreatedAsync`, que **solo crea tablas si la base no existe**. 
 | # | Acción | Resultado esperado |
 | --- | --- | --- |
 | 1 | `POST /auth/login` | 200 con `accessToken` y `refreshToken` |
-| 2 | `GET /WeatherForecast` con el access token | 200 |
+| 2 | `GET /WeatherForecast` con el access token del admin | 200 |
 | 3 | `POST /auth/refresh` con el refresh token | 200 con un access y un refresh **distintos** |
 | 4 | `POST /auth/refresh` con el refresh token **viejo** | 401 (reutilización detectada) |
 | 5 | `POST /auth/refresh` con el refresh token **nuevo** del paso 3 | 401 (se revocó toda la familia) |
