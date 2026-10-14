@@ -1,6 +1,125 @@
-@ApiConControllers_HostAddress = http://localhost:5224
+@host = http://localhost:5224
 
-GET {{ApiConControllers_HostAddress}}/weatherforecast/
+### Weather (rutas anteriores)
+GET {{host}}/weatherforecast/
 Accept: application/json
 
-###
+### ======== Permisos basados en roles (ver PERMISSION-BASED-AUTHORIZATION.md) ========
+
+### Login como Admin: tiene todos los permisos de Products
+# @name adminLogin
+POST {{host}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "admin@example.com",
+  "password": "Admin123!"
+}
+
+### Login como Manager: solo View y Create
+# @name managerLogin
+POST {{host}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "manager@example.com",
+  "password": "Manager123!"
+}
+
+### Login como User: solo View
+# @name userLogin
+POST {{host}}/auth/login
+Content-Type: application/json
+
+{
+  "email": "user@example.com",
+  "password": "User123!"
+}
+
+### Borrar sin token -> 401 (no hay identidad)
+DELETE {{host}}/Products/1
+
+### User borra -> 403 (autenticado, pero sin Products.Delete)
+DELETE {{host}}/Products/1
+Authorization: Bearer {{userLogin.response.body.accessToken}}
+
+### Admin borra -> 204
+DELETE {{host}}/Products/1
+Authorization: Bearer {{adminLogin.response.body.accessToken}}
+
+### Manager crea un producto -> 201
+POST {{host}}/Products
+Content-Type: application/json
+Authorization: Bearer {{managerLogin.response.body.accessToken}}
+
+{
+  "name": "Standing Desk",
+  "price": 429.00
+}
+
+### Que puede hacer hoy el rol Manager?
+GET {{host}}/admin/roles/Manager/permissions
+Authorization: Bearer {{adminLogin.response.body.accessToken}}
+
+### Revocar Create a Manager: sin redespliegue ni reinicio
+DELETE {{host}}/admin/roles/Manager/permissions
+Content-Type: application/json
+Authorization: Bearer {{adminLogin.response.body.accessToken}}
+
+{
+  "permission": "Permissions.Products.Create"
+}
+
+### Manager crea otra vez con el MISMO token -> 403 de inmediato
+# Con Permissions:Source = Lookup se deniega en la siguiente peticion.
+# Cambia appsettings.json a "Token" y esto sigue dando 201 hasta que el token expire.
+POST {{host}}/Products
+Content-Type: application/json
+Authorization: Bearer {{managerLogin.response.body.accessToken}}
+
+{
+  "name": "Desk Lamp",
+  "price": 59.00
+}
+
+### Concederlo de nuevo
+POST {{host}}/admin/roles/Manager/permissions
+Content-Type: application/json
+Authorization: Bearer {{adminLogin.response.body.accessToken}}
+
+{
+  "permission": "Permissions.Products.Create"
+}
+
+### ======== Segundo modulo: Orders (ver seccion 10 de la guia) ========
+
+### Manager lista pedidos -> 200 (tiene Orders.View)
+GET {{host}}/Orders
+Authorization: Bearer {{managerLogin.response.body.accessToken}}
+
+### User lista pedidos -> 403 (solo tiene Products.View: cada modulo se concede por separado)
+GET {{host}}/Orders
+Authorization: Bearer {{userLogin.response.body.accessToken}}
+
+### Manager borra un pedido -> 403 (no tiene Orders.Delete)
+DELETE {{host}}/Orders/1
+Authorization: Bearer {{managerLogin.response.body.accessToken}}
+
+### Conceder Orders.Delete a Manager -> el endpoint reconoce el modulo nuevo
+POST {{host}}/admin/roles/Manager/permissions
+Content-Type: application/json
+Authorization: Bearer {{adminLogin.response.body.accessToken}}
+
+{
+  "permission": "Permissions.Orders.Delete"
+}
+
+### Cuanto cuesta poner permisos dentro del token?
+GET {{host}}/Diagnostics/token-size
+
+### Medir un numero concreto de permisos
+GET {{host}}/Diagnostics/token-size?permissions=120
+
+### Como son los claims de quien llama (util cuando se deniega en silencio)
+GET {{host}}/Diagnostics/claims
+Authorization: Bearer {{adminLogin.response.body.accessToken}}
