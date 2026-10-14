@@ -47,3 +47,7 @@ msbuild.wrn
 node_modules/
 package-lock.json
 package.json
+# Base de datos SQLite local (se genera al ejecutar la app)
+auth.db
+auth.db-shm
+auth.db-wal
